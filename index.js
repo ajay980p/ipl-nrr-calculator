@@ -95,18 +95,34 @@ async function askBetterPosition(currentRank) {
     const curRank = pointsTable.findIndex(t => t.team === team.team) + 1;
     const curNRR = team.nrr ?? "N/A";
     const requiredNRR = (targetTeam.nrr + 0.001).toFixed(3);
-    // const maxRequiredNRR = desiredPos === 0 ? pointsTable[0].nrr : pointsTable[desiredPos - 2].nrr;
 
-    // const maxRequiredNRR = pointsTable[desiredPos - 1].points - pointsTable[desiredPos - 2].points === 0 ?
-    //     pointsTable[desiredPos - 2].nrr : 999;
+    /* 4️⃣  work out points & NRR limits BEFORE running a simulation */
 
-    const pointsAfterWin = team.points + 2;   // your team gets two points
-    const teamAbove = pointsTable[desiredPos - 2];  // team just ahead of target pos
+    const pointsAfterWin = team.points + 2;                    // +2 for a victory
 
-    let maxRequiredNRR = Infinity;            // default: no ceiling
-    if (teamAbove && pointsAfterWin === teamAbove.points) {
-        maxRequiredNRR = teamAbove.nrr;         // cap = NRR of team above, if tied
+    /* 4-a  If a win still leaves you below the target team’s points -> impossible */
+    if (pointsAfterWin < targetTeam.points) {
+        console.log(
+            `❌ Even with a win, ${team.team} would have ${pointsAfterWin} points, `
+            + `below ${targetTeam.team}'s ${targetTeam.points}. `
+            + `Position ${desiredPos} cannot be reached in one match.`
+        );
+        rl.close();
+        return;
     }
+
+    /* 4-b  Decide whether we must cap the revised NRR               */
+    /*      (only when we'll TIE on points with the team ABOVE us)   */
+    let nrrCap = Infinity;                                      // default: no ceiling
+    if (desiredPos > 1) {                                       // if a team exists above
+        const teamAbove = pointsTable[desiredPos - 2];          // ← one slot ahead
+        if (teamAbove && pointsAfterWin === teamAbove.points) {
+            nrrCap = teamAbove.nrr;                             // cap at their NRR
+        }
+    }
+
+    /* 4-c  Minimum NRR to beat the target team                      */
+    const minNRRNeeded = targetTeam.nrr + 0.001;
 
     console.log("\n================ MATCH SUMMARY ================");
     console.log(`Your Team        : ${team.team}`);
@@ -128,7 +144,14 @@ async function askBetterPosition(currentRank) {
     /* 5️⃣ run NRR simulation – PDF-style */
     let sim;
     if (batsFirst) {
-        sim = simulateBattingFirst(team, opponent, score, overs, parseFloat(requiredNRR), parseFloat(maxRequiredNRR));
+        sim = simulateBattingFirst(
+            team,
+            opponent,
+            score,
+            overs,
+            minNRRNeeded,   // ← lower bound
+            nrrCap          // ← upper bound  (Infinity or a real cap)
+        );
         console.log(`📊 Scenario • If ${team.team} bat first and score ${score} runs in ${overs} overs…`);
 
         if (sim) {
@@ -140,7 +163,14 @@ async function askBetterPosition(currentRank) {
             console.log("❌ Cannot reach desired position in this batting-first scenario.");
         }
     } else {
-        sim = simulateBowlingFirst(team, opponent, score, overs, parseFloat(requiredNRR));
+        const sim = simulateBowlingFirst(
+            team,
+            opponent,
+            score,          // targetRuns
+            overs,
+            minNRRNeeded,   // lower bound = targetTeam.nrr + 0.001
+            nrrCap          // upper bound = Infinity  OR teamAbove.nrr when points tie
+        );
         console.log(`📊 Scenario • If ${opponent.team} bat first and score ${score} runs in ${overs} overs…`);
 
         if (sim) {
